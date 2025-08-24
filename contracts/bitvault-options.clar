@@ -333,3 +333,112 @@
     (ok true)
   )
 )
+
+;; Execute put option exercise
+(define-private (exercise-put
+    (token <sip-010-trait>)
+    (option {
+      writer: principal,
+      holder: (optional principal),
+      collateral-amount: uint,
+      strike-price: uint,
+      premium: uint,
+      expiry: uint,
+      is-exercised: bool,
+      option-type: (string-ascii 4),
+      state: (string-ascii 9),
+    })
+    (current-price uint)
+  )
+  (let (
+      (profit (- (get strike-price option) current-price))
+      (payout (get-min profit (get collateral-amount option)))
+    )
+    ;; Transfer profit to option holder
+    (try! (as-contract (contract-call? token transfer payout tx-sender
+      (unwrap! (get holder option) ERR-NOT-AUTHORIZED) none
+    )))
+
+    ;; Return remaining collateral to writer
+    (try! (as-contract (contract-call? token transfer (- (get collateral-amount option) payout)
+      tx-sender (get writer option) none
+    )))
+
+    ;; Mark option as exercised
+    (map-set options (get-option-id option)
+      (merge option {
+        is-exercised: true,
+        state: "EXERCISED",
+      })
+    )
+
+    (ok true)
+  )
+)
+
+;; UTILITY AND VALIDATION FUNCTIONS
+
+;; Get current BTC price from oracle
+(define-private (get-current-price)
+  (get price (unwrap! (map-get? price-feeds "BTC-USD") u0))
+)
+
+;; Helper to get option ID (placeholder implementation)
+(define-private (get-option-id (option {
+  writer: principal,
+  holder: (optional principal),
+  collateral-amount: uint,
+  strike-price: uint,
+  premium: uint,
+  expiry: uint,
+  is-exercised: bool,
+  option-type: (string-ascii 4),
+  state: (string-ascii 9),
+}))
+  (var-get next-option-id)
+)
+
+;; Check if token is whitelisted for trading
+(define-private (is-approved-token (token principal))
+  (default-to false (map-get? approved-tokens token))
+)
+
+;; Check if symbol is approved for price feeds
+(define-private (is-allowed-symbol (symbol (string-ascii 10)))
+  (default-to false (map-get? allowed-symbols symbol))
+)
+
+;; Validate principal address
+(define-private (is-valid-principal (address principal))
+  (and
+    (not (is-eq address (as-contract tx-sender)))
+    (not (is-eq address .base))
+    (not (is-eq address tx-sender))
+    true
+  )
+)
+
+;; Validate trading symbol format
+(define-private (is-valid-symbol (symbol (string-ascii 10)))
+  (and
+    (not (is-eq symbol ""))
+    (not (is-eq symbol " "))
+    (>= (len symbol) u2)
+  )
+)
+
+;; Check if token is critical to protocol
+(define-private (is-critical-token (token principal))
+  (or
+    (is-eq token .wrapped-btc)
+    (is-eq token .wrapped-stx)
+  )
+)
+
+;; Check if symbol is critical to protocol
+(define-private (is-critical-symbol (symbol (string-ascii 10)))
+  (or
+    (is-eq symbol "BTC-USD")
+    (is-eq symbol "STX-USD")
+  )
+)
